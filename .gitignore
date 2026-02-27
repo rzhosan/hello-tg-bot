@@ -8,3 +8,7 @@ venv/
 env/
 ENV/
 .venv
+bot_data.pkl
+spin_data.json
+users_spins.json
+users_spins.txt
