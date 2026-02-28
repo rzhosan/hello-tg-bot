@@ -84,42 +84,66 @@ TRANSLATIONS = {
     }
 }
 from telegram.ext import ContextTypes
-async def killmesage(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler for /killmesage command - asks for confirmation to delete all messages"""
+async def killmeasege(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler for /killmeasege command - asks for confirmation to delete bot messages"""
     # Check if bot is blocked
     if await check_if_blocked(update, context):
         return
     # Check if language is selected
     if not await check_language_selected(update, context):
         return
+    
+    # Initialize message tracking if not exists
+    if 'bot_messages' not in context.user_data:
+        context.user_data['bot_messages'] = []
+    
     keyboard = InlineKeyboardMarkup([
         [
             InlineKeyboardButton("Tak", callback_data="killmsg_yes"),
             InlineKeyboardButton("Nie", callback_data="killmsg_no")
         ]
     ])
-    await update.message.reply_text("⚠️ Czy chcesz usunąć wszystkie wiadomości?", reply_markup=keyboard)
+    
+    msg_count = len(context.user_data['bot_messages'])
+    confirm_msg = await update.message.reply_text(
+        f"⚠️ Czy na pewno chcesz usunąć wiadomości od bota?\n\nŚledzonych wiadomości: {msg_count}",
+        reply_markup=keyboard
+    )
+    
+    # Try to delete the command message
+    try:
+        await update.message.delete()
+    except:
+        pass
 
-async def button_killmesage_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def button_killmeasege_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    
     if query.data == "killmsg_yes":
-        # Usuń wszystkie wiadomości użytkownika w czacie (tylko ostatnie, które bot może usunąć)
         chat_id = query.message.chat_id
-        user_id = query.from_user.id
         deleted = 0
-        try:
-            chat = await context.application.bot.get_chat(chat_id)
-            async for msg in chat.get_history(limit=100):
-                if msg.from_user and msg.from_user.id == user_id:
-                    try:
-                        await context.bot.delete_message(chat_id, msg.message_id)
-                        deleted += 1
-                    except Exception:
-                        pass
-            await query.edit_message_text(f"✅ Usunięto {deleted} wiadomości.")
-        except Exception as e:
-            await query.edit_message_text(f"Błąd podczas usuwania: {e}")
+        
+        # Initialize if not exists
+        if 'bot_messages' not in context.user_data:
+            context.user_data['bot_messages'] = []
+        
+        # Delete all tracked bot messages
+        for msg_id in context.user_data.get('bot_messages', []):
+            try:
+                await context.bot.delete_message(chat_id, msg_id)
+                deleted += 1
+            except Exception:
+                pass
+        
+        # Clear the list
+        context.user_data['bot_messages'] = []
+        
+        # Delete the confirmation message
+        await query.edit_message_text(f"✅ Usunięto {deleted} wiadomości.")
+    
+    elif query.data == "killmsg_no":
+        await query.edit_message_text("❌ Anulowano.")
 
 def get_text(context, key, *args):
     """Get translated text based on user's language preference"""
@@ -1017,8 +1041,8 @@ def main():
     application = Application.builder().token(token).persistence(persistence).build()
 
     # Register command handlers
-    application.add_handler(CommandHandler("killmesage", killmesage))
-    application.add_handler(CallbackQueryHandler(button_killmesage_handler, pattern="killmsg_yes|killmsg_no"))
+    application.add_handler(CommandHandler("killmeasege", killmeasege))
+    application.add_handler(CallbackQueryHandler(button_killmeasege_handler, pattern="killmsg_yes|killmsg_no"))
     
     # Register command handlers
     application.add_handler(CommandHandler("start", start))
