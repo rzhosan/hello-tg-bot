@@ -304,9 +304,9 @@ async def langulagi(update: Update, context: ContextTypes.DEFAULT_TYPE):
         combined_keyboard = InlineKeyboardMarkup(
             keyboard.inline_keyboard + ad_keyboard.inline_keyboard
         )
-        await update.message.reply_text(message_text, reply_markup=combined_keyboard)
+        await reply_and_track(update, context, message_text, reply_markup=combined_keyboard)
     else:
-        await update.message.reply_text(message_text, reply_markup=keyboard)
+        await reply_and_track(update, context, message_text, reply_markup=keyboard)
 
 def get_total_wins(user_id):
     """Get total number of wins for a user"""
@@ -994,7 +994,7 @@ async def handle_successful_payment(update: Update, context: ContextTypes.DEFAUL
             print(f"   Timeout: {context.bot_data[undo_key]['timeout']} (current: {time.time()}, diff: {context.bot_data[undo_key]['timeout'] - time.time()}s)")
             
             # Send success message with Undo button
-            undo_msg = await update.message.reply_text(
+            undo_msg = await reply_and_track(update, context,
                 get_text(context, 'payment_success', context.user_data['spin_uses']),
                 reply_markup=keyboard
             )
@@ -1032,7 +1032,7 @@ async def handle_successful_payment(update: Update, context: ContextTypes.DEFAUL
             # Refund the payment
             try:
                 await context.bot.refund_star_payment(user_id, charge_id)
-                await update.message.reply_text(
+                await reply_and_track(update, context,
                     "❌ Błąd podczas przetwarzania płatności.\n\n"
                     "✅ Twoje gwiazdki zostały zwrócone.\n\n"
                     "Spróbuj ponownie za chwilę lub skontaktuj się z supportem."
@@ -1040,7 +1040,7 @@ async def handle_successful_payment(update: Update, context: ContextTypes.DEFAUL
                 print(f"✅ Refunded payment for {user_name} (ID: {user_id})")
             except Exception as refund_error:
                 print(f"❌ Failed to refund payment for {user_name} (ID: {user_id}): {refund_error}")
-                await update.message.reply_text(
+                await reply_and_track(update, context,
                     "❌ Błąd podczas przetwarzania płatności i zwrotu pieniędzy.\n\n"
                     f"Skontaktuj się z supportem podając ID: {user_id}"
                 )
