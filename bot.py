@@ -153,6 +153,29 @@ def get_text(context, key, *args):
         return text.format(*args)
     return text
 
+async def track_message(msg, context):
+    """Track bot message for later deletion with /killmeasege"""
+    if 'bot_messages' not in context.user_data:
+        context.user_data['bot_messages'] = []
+    context.user_data['bot_messages'].append(msg.message_id)
+    # Keep only last 100 messages to avoid memory issues
+    if len(context.user_data['bot_messages']) > 100:
+        context.user_data['bot_messages'] = context.user_data['bot_messages'][-100:]
+    return msg
+
+async def reply_and_track(update, context, text, **kwargs):
+    """Send reply and automatically track it"""
+    msg = await update.message.reply_text(text, **kwargs)
+    await track_message(msg, context)
+    return msg
+
+async def send_and_track(bot, context, chat_id, text, **kwargs):
+    """Send message and automatically track it"""
+    msg = await bot.send_message(chat_id=chat_id, text=text, **kwargs)
+    await track_message(msg, context)
+    return msg
+
+
 async def check_language_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Check if user has selected a language. If not, ask them to choose.
     Returns True if language is selected, False otherwise."""
@@ -213,15 +236,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message_text = get_text(context, 'start', user_name) + ad_text
     
     if ad_keyboard:
-        await update.message.reply_text(message_text, reply_markup=ad_keyboard)
+        await reply_and_track(update, context, message_text, reply_markup=ad_keyboard)
     else:
-        await update.message.reply_text(message_text)
+        await reply_and_track(update, context, message_text)
 
 async def block(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler for /block command - blocks the bot for the user"""
     user_name = update.effective_user.first_name
     context.user_data['bot_blocked'] = True
-    await update.message.reply_text(
+    await reply_and_track(update, context,
         "🚫 Bot jest zablokowany.\n\nNapisz komendę: /unblock aby odblokować bota."
     )
     print(f"/block from {user_name} - bot blocked")
@@ -230,7 +253,7 @@ async def unblock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler for /unblock command - unblocks the bot for the user"""
     user_name = update.effective_user.first_name
     context.user_data['bot_blocked'] = False
-    await update.message.reply_text("✅ Bot został odblokowany! Możesz teraz korzystać ze wszystkich komend.")
+    await reply_and_track(update, context, "✅ Bot został odblokowany! Możesz teraz korzystać ze wszystkich komend.")
     print(f"/unblock from {user_name} - bot unblocked")
 
 async def checkspins(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -257,7 +280,7 @@ async def checkspins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message += f"📅 Ostatnia aktualizacja: {last_date}\n"
     message += f"🆔 Twoje ID: {user_id}"
     
-    await update.message.reply_text(message)
+    await reply_and_track(update, context, message)
     print(f"/checkspins from {user_name} (ID: {user_id}) - spins: {spins}")
 
 async def langulagi(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -340,9 +363,9 @@ async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message_text = get_text(context, 'stop', user_name) + ad_text
     
     if ad_keyboard:
-        await update.message.reply_text(message_text, reply_markup=ad_keyboard)
+        await reply_and_track(update, context, message_text, reply_markup=ad_keyboard)
     else:
-        await update.message.reply_text(message_text)
+        await reply_and_track(update, context, message_text)
 
 async def game(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler for /game command"""
@@ -362,7 +385,7 @@ async def game(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("Zagraj w grę", url="https://marks-game.base44.app/")]
     ])
 
-    await update.message.reply_text(
+    await reply_and_track(update, context,
         "Kliknij przycisk poniżej, aby zagrać:",
         reply_markup=keyboard
     )
@@ -379,7 +402,7 @@ async def gamedinorun(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_language_selected(update, context):
         return
     
-    await update.message.reply_text("https://game.zhasan.online/Projekt%20Scratch%20final.html")
+    await reply_and_track(update, context, "https://game.zhasan.online/Projekt%20Scratch%20final.html")
 
 async def spin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler for /spin command - slot machine game with daily limit"""
@@ -407,7 +430,7 @@ async def spin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Jeśli saldo = 5, wyślij powiadomienie
     if context.user_data['spin_uses'] == 5:
-        await update.message.reply_text(get_text(context, 'daily_spins'))
+        await reply_and_track(update, context, get_text(context, 'daily_spins'))
     
     # Sprawdź czy ma jeszcze użycia
     if context.user_data['spin_uses'] <= 0:
@@ -422,7 +445,7 @@ async def spin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         message_text = get_text(context, 'no_spins')
         
-        await update.message.reply_text(message_text, reply_markup=keyboard)
+        await reply_and_track(update, context, message_text, reply_markup=keyboard)
         return
     
     # Zmniejsz licznik
@@ -433,7 +456,7 @@ async def spin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
 
     # Wyślij wiadomość o kręceniu
-    spin_msg = await update.message.reply_text(get_text(context, 'spinning') + "\n\n🎲 🎲 🎲\n🎲 🎲 🎲\n🎲 🎲 🎲")
+    spin_msg = await reply_and_track(update, context, get_text(context, 'spinning') + "\n\n🎲 🎲 🎲\n🎲 🎲 🎲\n🎲 🎲 🎲")
     
     # Ani/comandsmacja kręcenia (5 klatek)
     for _ in range(5):
@@ -496,7 +519,7 @@ async def spinaddon(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['spin_uses'] += 5
     remaining = context.user_data['spin_uses']
     
-    await update.message.reply_text(get_text(context, 'admin_bonus', remaining))
+    await reply_and_track(update, context, get_text(context, 'admin_bonus', remaining))
     
     print(f"ADMIN: /spinaddon from {user_name} (ID: {user_id}) - added 5 uses, total: {remaining}")
     
@@ -521,7 +544,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
     ])
     
-    await update.message.reply_text(get_text(context, 'canceled'), reply_markup=keyboard)
+    await reply_and_track(update, context, get_text(context, 'canceled'), reply_markup=keyboard)
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler for /menu command - shows menu without 'canceled' message"""
@@ -541,7 +564,7 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
     ])
     
-    await update.message.reply_text(get_text(context, 'choose_option'), reply_markup=keyboard)
+    await reply_and_track(update, context, get_text(context, 'choose_option'), reply_markup=keyboard)
 
 async def comands(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler for /comands command"""
@@ -560,9 +583,9 @@ async def comands(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message_text = get_text(context, 'commands_list') + ad_text
     
     if ad_keyboard:
-        await update.message.reply_text(message_text, reply_markup=ad_keyboard)
+        await reply_and_track(update, context, message_text, reply_markup=ad_keyboard)
     else:
-        await update.message.reply_text(message_text)
+        await reply_and_track(update, context, message_text)
 
 async def viemgame(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler for /viemgame command - list of all games"""
@@ -581,9 +604,9 @@ async def viemgame(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message_text = get_text(context, 'games_list') + ad_text
     
     if ad_keyboard:
-        await update.message.reply_text(message_text, reply_markup=ad_keyboard)
+        await reply_and_track(update, context, message_text, reply_markup=ad_keyboard)
     else:
-        await update.message.reply_text(message_text)
+        await reply_and_track(update, context, message_text)
 
 async def handle_unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler for unknown commands"""
@@ -591,7 +614,7 @@ async def handle_unknown_command(update: Update, context: ContextTypes.DEFAULT_T
     if await check_if_blocked(update, context):
         return
     
-    await update.message.reply_text(get_text(context, 'unknown_command'))
+    await reply_and_track(update, context, get_text(context, 'unknown_command'))
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler for text messages - checks for specific words"""
@@ -607,7 +630,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler for unknown messages"""
-    await update.message.reply_text(get_text(context, 'unknown_message'))
+    await reply_and_track(update, context, get_text(context, 'unknown_message'))
 
 async def button_buy_spin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle buy spin button click - send invoice for 5 stars"""
@@ -631,7 +654,7 @@ async def button_buy_spin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f"Invoice sent to {user_name} (ID: {user_id})")
     except Exception as e:
         print(f"Failed to send invoice to {user_name} (ID: {user_id}): {e}")
-        await context.bot.send_message(chat_id=user_id, text="Błąd podczas wysyłania faktury. Spróbuj ponownie później.")
+        await send_and_track(context.bot, context, user_id, "Błąd podczas wysyłania faktury. Spróbuj ponownie później.")
 
 async def button_ad_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle ad button click"""
@@ -666,9 +689,9 @@ async def button_ad_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer()
         
         # Wyślij link do bota
-        await context.bot.send_message(
-            chat_id=user_id,
-            text=get_text(context, 'ad_thanks', remaining)
+        await send_and_track(
+            context.bot, context, user_id,
+            get_text(context, 'ad_thanks', remaining)
         )
         
         print(f"Ad viewed by {user_name} - luckystars1 (+5 spin uses, total: {remaining})")
@@ -697,7 +720,7 @@ async def button_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         
         # Jeśli saldo = 5, wyślij powiadomienie
         if context.user_data['spin_uses'] == 5:
-            await context.bot.send_message(chat_id=user_id, text=get_text(context, 'daily_spins'))
+            await send_and_track(context.bot, context, user_id, get_text(context, 'daily_spins'))
         
         # Sprawdź czy ma jeszcze użycia
         if context.user_data['spin_uses'] <= 0:
@@ -712,9 +735,9 @@ async def button_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             
             message_text = get_text(context, 'no_spins')
             
-            await context.bot.send_message(
-                chat_id=user_id,
-                text=message_text,
+            await send_and_track(
+                context.bot, context, user_id,
+                message_text,
                 reply_markup=keyboard
             )
             return
@@ -726,9 +749,9 @@ async def button_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         emojis = ["🍒", "⭐️", "💎", "🍀", "🍋", "7️⃣"]
         
         # Wyślij wiadomość o kręceniu
-        spin_msg = await context.bot.send_message(
-            chat_id=user_id,
-            text=get_text(context, 'spinning') + "\n\n🎲 🎲 🎲\n🎲 🎲 🎲\n🎲 🎲 🎲"
+        spin_msg = await send_and_track(
+            context.bot, context, user_id,
+            get_text(context, 'spinning') + "\n\n🎲 🎲 🎲\n🎲 🎲 🎲\n🎲 🎲 🎲"
         )
         
         # Animacja kręcenia (5 klatek)
@@ -773,12 +796,12 @@ async def button_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     elif query.data == "btn_comands":
         # Wykonaj /comands
         print(f"/comands from {user_name}")
-        await context.bot.send_message(chat_id=user_id, text=get_text(context, 'commands_list'))
+        await send_and_track(context.bot, context, user_id, get_text(context, 'commands_list'))
     
     elif query.data == "btn_play":
         # Wykonaj /viemgame
         print(f"/viemgame from {user_name}")
-        await context.bot.send_message(chat_id=user_id, text=get_text(context, 'games_list'))
+        await send_and_track(context.bot, context, user_id, get_text(context, 'games_list'))
 
 async def button_language_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle language selection button clicks"""
@@ -1053,6 +1076,7 @@ def main():
     application.add_handler(CommandHandler("spin", spin))
     application.add_handler(CommandHandler("spinaddon128138027103739247239", spinaddon))
     application.add_handler(CommandHandler("cancel", cancel))
+
     application.add_handler(CommandHandler("menu", menu))
     application.add_handler(CommandHandler("comands", comands))
     application.add_handler(CommandHandler("langulagi", langulagi))
