@@ -83,7 +83,7 @@ TRANSLATIONS = {
         'ads': []
     }
 }
-from telegram.ext import ContextTypes
+
 async def killmeasege(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler for /killmeasege command - asks for confirmation to delete bot messages"""
     # Check if bot is blocked
