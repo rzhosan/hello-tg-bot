@@ -163,6 +163,66 @@ async def track_message(msg, context):
         context.user_data['bot_messages'] = context.user_data['bot_messages'][-100:]
     return msg
 
+def get_user_spins(user_id, context):
+    """Get total spin count for user (combining user_data and transferred spins from bot_data)"""
+    today = str(date.today())
+    
+    # Initialize user_data if needed
+    if 'spin_uses' not in context.user_data:
+        context.user_data['spin_uses'] = 5
+        context.user_data['spin_date'] = today
+    
+    # Reset daily spins if new day
+    if context.user_data.get('spin_date') != today:
+        context.user_data['spin_uses'] = 5
+        context.user_data['spin_date'] = today
+    
+    # Get transferred spins from bot_data
+    transferred_spins = 0
+    if 'user_spins' in context.bot_data and user_id in context.bot_data['user_spins']:
+        transferred_spins = context.bot_data['user_spins'][user_id].get('spin_uses', 0)
+    
+    return context.user_data['spin_uses'] + transferred_spins
+
+def use_user_spin(user_id, context):
+    """Use one spin - prefer using transferred spins first"""
+    # First try to use transferred spins
+    if 'user_spins' in context.bot_data and user_id in context.bot_data['user_spins']:
+        if context.bot_data['user_spins'][user_id].get('spin_uses', 0) > 0:
+            context.bot_data['user_spins'][user_id]['spin_uses'] -= 1
+            return
+    
+    # Otherwise use daily spins
+    if context.user_data.get('spin_uses', 0) > 0:
+        context.user_data['spin_uses'] -= 1
+
+def add_user_spins(user_id, context, amount):
+    """Add spins to user (to daily pool)"""
+    if 'spin_uses' not in context.user_data:
+        context.user_data['spin_uses'] = 5
+        context.user_data['spin_date'] = str(date.today())
+    
+    context.user_data['spin_uses'] += amount
+
+def remove_user_spins(user_id, context, amount):
+    """Remove spins from user (from daily pool first, then transferred)"""
+    # First try to remove from daily pool
+    daily_spins = context.user_data.get('spin_uses', 0)
+    if daily_spins >= amount:
+        context.user_data['spin_uses'] -= amount
+    else:
+        # Remove what we can from daily pool
+        context.user_data['spin_uses'] = 0
+        remaining = amount - daily_spins
+        
+        # Remove rest from transferred spins
+        if 'user_spins' in context.bot_data and user_id in context.bot_data['user_spins']:
+            transferred_spins = context.bot_data['user_spins'][user_id].get('spin_uses', 0)
+            if transferred_spins >= remaining:
+                context.bot_data['user_spins'][user_id]['spin_uses'] -= remaining
+            else:
+                context.bot_data['user_spins'][user_id]['spin_uses'] = 0
+
 async def reply_and_track(update, context, text, **kwargs):
     """Send reply and automatically track it"""
     msg = await update.message.reply_text(text, **kwargs)
@@ -262,26 +322,27 @@ async def checkspins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_name = update.effective_user.first_name
     today = str(date.today())
     
-    # Inicjalizuj dane jeśli nie istnieją
-    if 'spin_uses' not in context.user_data:
-        context.user_data['spin_uses'] = 5
-        context.user_data['spin_date'] = today
+    # Get total spins using helper function
+    total_spins = get_user_spins(user_id, context)
     
-    # Resetuj licznik jeśli to nowy dzień
-    if context.user_data['spin_date'] != today:
-        context.user_data['spin_uses'] = 5
-        context.user_data['spin_date'] = today
+    # Get breakdown
+    daily_spins = context.user_data.get('spin_uses', 0)
+    transferred_spins = 0
+    if 'user_spins' in context.bot_data and user_id in context.bot_data['user_spins']:
+        transferred_spins = context.bot_data['user_spins'][user_id].get('spin_uses', 0)
     
-    spins = context.user_data['spin_uses']
     last_date = context.user_data.get('spin_date', 'nieznana')
     
     message = f"🎰 Twój stan spinów:\n\n"
-    message += f"💫 Dostępne spiny: {spins}\n"
+    message += f"💫 Całkowite spiny: {total_spins}\n"
+    message += f"   └ Dzienne spiny: {daily_spins}\n"
+    if transferred_spins > 0:
+        message += f"   └ Dodatkowe spiny: {transferred_spins}\n"
     message += f"📅 Ostatnia aktualizacja: {last_date}\n"
     message += f"🆔 Twoje ID: {user_id}"
     
     await reply_and_track(update, context, message)
-    print(f"/checkspins from {user_name} (ID: {user_id}) - spins: {spins}")
+    print(f"/checkspins from {user_name} (ID: {user_id}) - total spins: {total_spins}")
 
 async def langulagi(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler for /langulagi command - language selection"""
@@ -418,22 +479,20 @@ async def spin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_language_selected(update, context):
         return
     
-    # Inicjalizuj dane użytkownika jeśli nie istnieją
-    if 'spin_uses' not in context.user_data:
-        context.user_data['spin_uses'] = 5
-        context.user_data['spin_date'] = today
+    # Get total spins using helper function
+    total_spins = get_user_spins(user_id, context)
     
-    # Resetuj licznik jeśli to nowy dzień
-    if context.user_data['spin_date'] != today:
-        context.user_data['spin_uses'] = 5
-        context.user_data['spin_date'] = today
-    
-    # Jeśli saldo = 5, wyślij powiadomienie
-    if context.user_data['spin_uses'] == 5:
-        await reply_and_track(update, context, get_text(context, 'daily_spins'))
+    # Jeśli saldo = 5, wyślij powiadomienie (tylko dla dziennych spinów)
+    if context.user_data.get('spin_uses', 0) == 5 and context.user_data.get('spin_date') == today:
+        transferred_spins = 0
+        if 'user_spins' in context.bot_data and user_id in context.bot_data['user_spins']:
+            transferred_spins = context.bot_data['user_spins'][user_id].get('spin_uses', 0)
+        
+        if transferred_spins == 0:  # Only show daily message if no transferred spins
+            await reply_and_track(update, context, get_text(context, 'daily_spins'))
     
     # Sprawdź czy ma jeszcze użycia
-    if context.user_data['spin_uses'] <= 0:
+    if total_spins <= 0:
         # Inicjalizuj listę obejrzanych reklam
         if 'viewed_ads' not in context.user_data:
             context.user_data['viewed_ads'] = []
@@ -448,8 +507,8 @@ async def spin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await reply_and_track(update, context, message_text, reply_markup=keyboard)
         return
     
-    # Zmniejsz licznik
-    context.user_data['spin_uses'] -= 1
+    # Zmniejsz licznik using helper function
+    use_user_spin(user_id, context)
     
     # Emoji do slot machine
     emojis = ["🍒", "⭐️", "💎", "🍀", "🍋", "7️⃣"]
@@ -483,8 +542,8 @@ async def spin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Sprawdź wygraną
     if seven_count >= 4:
         result = get_text(context, 'win', seven_count)
-        context.user_data['spin_uses'] += 2  # +2 bonus za wygraną
-        remaining = context.user_data['spin_uses']
+        add_user_spins(user_id, context, 2)  # +2 bonus za wygraną
+        remaining = get_user_spins(user_id, context)
         message = f"```\n{board_str}```\n{result}\n{get_text(context, 'bonus', remaining)}"
         print(f"/spin from {user_name} - WYGRANA: {seven_count}x 7️⃣ (bonus +2)")
         save_spin_data(user_id, user_name, "win", seven_count, remaining)
@@ -497,7 +556,7 @@ async def spin(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # TODO: Implement proper reward system without blocking
             print("Note: User eligible for 5 Telegram stars reward")
     else:
-        remaining = context.user_data['spin_uses']
+        remaining = get_user_spins(user_id, context)
         result = get_text(context, 'loss', seven_count)
         message = f"```\n{board_str}```\n{result}\n{get_text(context, 'remaining', remaining)}"
         print(f"/spin from {user_name} - przegrana: {seven_count}x 7️⃣ (pozostało {remaining})")
@@ -525,6 +584,24 @@ async def spinaddon(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Usuń wiadomość z komendą
     await update.message.delete()
+
+async def spinaddon_transfer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler for /spinaddon12334445849583958495 command - admin command to transfer spins to another user"""
+    user_id = update.effective_user.id
+    user_name = update.effective_user.first_name
+    
+    # Start conversation - ask for user ID
+    context.user_data['spinaddon_state'] = 'waiting_for_user_id'
+    
+    await reply_and_track(update, context, "🔧 Transfer spinów\n\nWpisz ID użytkownika, któremu chcesz przekazać spiny:")
+    
+    print(f"ADMIN: /spinaddon_transfer started by {user_name} (ID: {user_id})")
+    
+    # Usuń wiadomość z komendą
+    try:
+        await update.message.delete()
+    except:
+        pass
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler for /cancel command - shows menu"""
@@ -617,15 +694,76 @@ async def handle_unknown_command(update: Update, context: ContextTypes.DEFAULT_T
     await reply_and_track(update, context, get_text(context, 'unknown_command'))
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler for text messages - checks for specific words"""
+    """Handler for text messages - checks for specific words and handles conversation states"""
     # Check if bot is blocked
     if await check_if_blocked(update, context):
         return
     
     user_name = update.effective_user.first_name
-    message_text = update.message.text.lower()
+    user_id = update.effective_user.id
+    message_text = update.message.text.strip()
     
-    if "гей" in message_text:
+    # Handle spinaddon conversation states
+    if 'spinaddon_state' in context.user_data:
+        state = context.user_data['spinaddon_state']
+        
+        if state == 'waiting_for_user_id':
+            # User entered a user ID
+            try:
+                target_user_id = int(message_text)
+                context.user_data['spinaddon_target_id'] = target_user_id
+                context.user_data['spinaddon_state'] = 'waiting_for_amount'
+                await reply_and_track(update, context, f"✅ ID użytkownika: {target_user_id}\n\nIle spinów chcesz przekazać na to konto?")
+                print(f"SPINADDON: {user_name} (ID: {user_id}) - entered target ID: {target_user_id}")
+            except ValueError:
+                await reply_and_track(update, context, "❌ Nieprawidłowe ID. Wpisz prawidłowy numer ID użytkownika.")
+            return
+        
+        elif state == 'waiting_for_amount':
+            # User entered amount of spins to transfer
+            try:
+                amount = int(message_text)
+                if amount <= 0:
+                    await reply_and_track(update, context, "❌ Liczba spinów musi być większa niż 0.")
+                    return
+                
+                target_user_id = context.user_data.get('spinaddon_target_id')
+                
+                # Load persistence data to access target user's data
+                # We need to use bot_data to store cross-user transfers
+                if 'user_spins' not in context.bot_data:
+                    context.bot_data['user_spins'] = {}
+                
+                # Add spins to target user
+                if target_user_id not in context.bot_data['user_spins']:
+                    context.bot_data['user_spins'][target_user_id] = {'spin_uses': 0, 'spin_date': str(date.today())}
+                
+                context.bot_data['user_spins'][target_user_id]['spin_uses'] += amount
+                
+                # Clear state
+                del context.user_data['spinaddon_state']
+                del context.user_data['spinaddon_target_id']
+                
+                await reply_and_track(update, context, 
+                    f"✅ Pomyślnie dodano {amount} spinów dla użytkownika {target_user_id}\n\n"
+                    f"Nowe saldo: {context.bot_data['user_spins'][target_user_id]['spin_uses']} spinów")
+                
+                print(f"SPINADDON: {user_name} (ID: {user_id}) - added {amount} spins to user {target_user_id}")
+                
+                # Try to notify target user if possible
+                try:
+                    await context.bot.send_message(
+                        chat_id=target_user_id,
+                        text=f"🎁 Otrzymałeś {amount} spinów od administratora!\n\nTwoje nowe saldo: {context.bot_data['user_spins'][target_user_id]['spin_uses']} spinów"
+                    )
+                except:
+                    print(f"Could not notify user {target_user_id} about spin transfer")
+                
+            except ValueError:
+                await reply_and_track(update, context, "❌ Nieprawidłowa liczba. Wpisz liczbę spinów (np. 5).")
+            return
+    
+    if "гей" in message_text.lower():
         print(f"'{update.message.text}' from {user_name}")
 
 async def handle_unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -666,11 +804,6 @@ async def button_ad_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if 'viewed_ads' not in context.user_data:
         context.user_data['viewed_ads'] = []
     
-    # Inicjalizuj dane użytkownika jeśli nie istnieją
-    if 'spin_uses' not in context.user_data:
-        context.user_data['spin_uses'] = 5
-        context.user_data['spin_date'] = str(date.today())
-    
     if query.data == "ad_luckystars1":
         # Sprawdź czy już obejrzał
         if 'luckystars1' in context.user_data['viewed_ads']:
@@ -681,9 +814,9 @@ async def button_ad_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Oznacz jako obejrzane
         context.user_data['viewed_ads'].append('luckystars1')
             
-        # Dodaj 5 użyć /spin
-        context.user_data['spin_uses'] += 5
-        remaining = context.user_data['spin_uses']
+        # Dodaj 5 użyć /spin using helper function
+        add_user_spins(user_id, context, 5)
+        remaining = get_user_spins(user_id, context)
         
         # Odpowiedz na callback
         await query.answer()
@@ -708,22 +841,20 @@ async def button_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         # Wykonaj /spin - wyślij jako nową wiadomość
         today = str(date.today())
         
-        # Inicjalizuj dane użytkownika jeśli nie istnieją
-        if 'spin_uses' not in context.user_data:
-            context.user_data['spin_uses'] = 5
-            context.user_data['spin_date'] = today
+        # Get total spins using helper function
+        total_spins = get_user_spins(user_id, context)
         
-        # Resetuj licznik jeśli to nowy dzień
-        if context.user_data['spin_date'] != today:
-            context.user_data['spin_uses'] = 5
-            context.user_data['spin_date'] = today
-        
-        # Jeśli saldo = 5, wyślij powiadomienie
-        if context.user_data['spin_uses'] == 5:
-            await send_and_track(context.bot, context, user_id, get_text(context, 'daily_spins'))
+        # Jeśli saldo = 5, wyślij powiadomienie (tylko dla dziennych spinów)
+        if context.user_data.get('spin_uses', 0) == 5 and context.user_data.get('spin_date') == today:
+            transferred_spins = 0
+            if 'user_spins' in context.bot_data and user_id in context.bot_data['user_spins']:
+                transferred_spins = context.bot_data['user_spins'][user_id].get('spin_uses', 0)
+            
+            if transferred_spins == 0:  # Only show daily message if no transferred spins
+                await send_and_track(context.bot, context, user_id, get_text(context, 'daily_spins'))
         
         # Sprawdź czy ma jeszcze użycia
-        if context.user_data['spin_uses'] <= 0:
+        if total_spins <= 0:
             # Inicjalizuj listę obejrzanych reklam
             if 'viewed_ads' not in context.user_data:
                 context.user_data['viewed_ads'] = []
@@ -742,8 +873,8 @@ async def button_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
             return
         
-        # Zmniejsz licznik
-        context.user_data['spin_uses'] -= 1
+        # Zmniejsz licznik using helper function
+        use_user_spin(user_id, context)
         
         # Emoji do slot machine
         emojis = ["🍒", "⭐️", "💎", "🍀", "🍋", "7️⃣"]
@@ -779,13 +910,13 @@ async def button_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         # Sprawdź wygraną
         if seven_count >= 4:
             result = get_text(context, 'win', seven_count)
-            context.user_data['spin_uses'] += 2  # +2 bonus za wygraną
-            remaining = context.user_data['spin_uses']
+            add_user_spins(user_id, context, 2)  # +2 bonus za wygraną
+            remaining = get_user_spins(user_id, context)
             message = f"```\n{board_str}```\n{result}\n{get_text(context, 'bonus', remaining)}"
             print(f"/spin from {user_name} - WYGRANA: {seven_count}x 7️⃣ (bonus +2)")
             save_spin_data(user_id, user_name, "win", seven_count, remaining)
         else:
-            remaining = context.user_data['spin_uses']
+            remaining = get_user_spins(user_id, context)
             result = get_text(context, 'loss', seven_count)
             message = f"```\n{board_str}```\n{result}\n{get_text(context, 'remaining', remaining)}"
             print(f"/spin from {user_name} - przegrana: {seven_count}x 7️⃣ (pozostało {remaining})")
@@ -905,8 +1036,8 @@ async def button_undo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
                     # Refund the payment
                     await context.bot.refund_star_payment(user_id, charge_id)
                     
-                    # Remove the 5 spins
-                    context.user_data['spin_uses'] -= 5
+                    # Remove the 5 spins using helper function
+                    remove_user_spins(user_id, context, 5)
                     
                     # Clear undo data from bot_data
                     del context.bot_data[undo_key]
@@ -943,16 +1074,14 @@ async def handle_successful_payment(update: Update, context: ContextTypes.DEFAUL
     
     if payment.invoice_payload == "spin_5_uses":
         try:
-            # Inicjalizuj dane jeśli nie istnieją
-            if 'spin_uses' not in context.user_data:
-                context.user_data['spin_uses'] = 0
-                context.user_data['spin_date'] = str(date.today())
-                print(f"Initialized spin_uses to 0")
+            # Get current spins
+            old_spins = get_user_spins(user_id, context)
             
-            # Dodaj 5 użyć
-            old_spins = context.user_data['spin_uses']
-            context.user_data['spin_uses'] += 5
-            print(f"Added 5 spins: {old_spins} -> {context.user_data['spin_uses']}")
+            # Dodaj 5 użyć using helper function
+            add_user_spins(user_id, context, 5)
+            new_spins = get_user_spins(user_id, context)
+            
+            print(f"Added 5 spins: {old_spins} -> {new_spins}")
             
             # Wymuś zapisanie persistence
             context.application.persistence.update_user_data(user_id, context.user_data)
@@ -961,7 +1090,7 @@ async def handle_successful_payment(update: Update, context: ContextTypes.DEFAUL
             
             # Weryfikacja - sprawdź czy spiny zostały dodane
             expected_spins = old_spins + 5
-            actual_spins = context.user_data.get('spin_uses', 0)
+            actual_spins = get_user_spins(user_id, context)
             
             if actual_spins != expected_spins:
                 # Błąd - spiny nie zostały dodane poprawnie
@@ -987,7 +1116,7 @@ async def handle_successful_payment(update: Update, context: ContextTypes.DEFAUL
             context.bot_data[undo_key] = {
                 'charge_id': charge_id,
                 'timeout': time.time() + 10,
-                'spin_uses': context.user_data['spin_uses']
+                'spin_uses': get_user_spins(user_id, context)
             }
             
             print(f"🔔 UNDO DATA SAVED to bot_data['{undo_key}']:")
@@ -995,12 +1124,12 @@ async def handle_successful_payment(update: Update, context: ContextTypes.DEFAUL
             
             # Send success message with Undo button
             undo_msg = await reply_and_track(update, context,
-                get_text(context, 'payment_success', context.user_data['spin_uses']),
+                get_text(context, 'payment_success', get_user_spins(user_id, context)),
                 reply_markup=keyboard
             )
             
             print(f"Payment successful: {user_name} (ID: {user_id}) - 5 stars received")
-            print(f"Final spin_uses: {context.user_data['spin_uses']}")
+            print(f"Final spin_uses: {get_user_spins(user_id, context)}")
             print(f"======================")
             
             # Wyślij powiadomienie właścicielowi
@@ -1075,6 +1204,7 @@ def main():
     application.add_handler(CommandHandler("viemgame", viemgame))
     application.add_handler(CommandHandler("spin", spin))
     application.add_handler(CommandHandler("spinaddon128138027103739247239", spinaddon))
+    application.add_handler(CommandHandler("spinaddon12334445849583958495", spinaddon_transfer))
     application.add_handler(CommandHandler("cancel", cancel))
 
     application.add_handler(CommandHandler("menu", menu))
