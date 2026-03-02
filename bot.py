@@ -888,6 +888,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await reply_and_track(update, context, "❌ Nieprawidłowa liczba. Wpisz liczbę spinów (np. 5).")
             return
     
+    # Check if bot is blocked (after admin conversation states)
+    if await check_if_blocked(update, context):
+        return
+    
     if "гей" in message_text.lower():
         print(f"'{update.message.text}' from {user_name}")
 
