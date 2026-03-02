@@ -564,6 +564,66 @@ async def spin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await spin_msg.edit_text(message, parse_mode="Markdown")
 
+def is_admin(user_id):
+    """Check if user is admin"""
+    admin_id = os.getenv('ADMIN_USER_ID')
+    if admin_id:
+        try:
+            return int(admin_id) == user_id
+        except ValueError:
+            return False
+    return False
+
+async def print_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler for /print command - admin only - send message to user"""
+    user_id = update.effective_user.id
+    user_name = update.effective_user.first_name
+    
+    # Check if user is admin
+    if not is_admin(user_id):
+        await reply_and_track(update, context, "❌ Nie masz uprawnień do tej komendy.")
+        print(f"UNAUTHORIZED: /print attempt by {user_name} (ID: {user_id})")
+        return
+    
+    # Start conversation - ask for username
+    context.user_data['print_state'] = 'waiting_for_username'
+    context.user_data['print_type'] = 'normal'
+    
+    await reply_and_track(update, context, "📨 Wysyłanie wiadomości\n\nWpisz username odbiorcy (np. @username) lub ID użytkownika:")
+    
+    print(f"ADMIN: /print started by {user_name} (ID: {user_id})")
+    
+    # Delete command message
+    try:
+        await update.message.delete()
+    except:
+        pass
+
+async def printsecret_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler for /printsecret command - admin only - send spoiler message to user"""
+    user_id = update.effective_user.id
+    user_name = update.effective_user.first_name
+    
+    # Check if user is admin
+    if not is_admin(user_id):
+        await reply_and_track(update, context, "❌ Nie masz uprawnień do tej komendy.")
+        print(f"UNAUTHORIZED: /printsecret attempt by {user_name} (ID: {user_id})")
+        return
+    
+    # Start conversation - ask for username
+    context.user_data['print_state'] = 'waiting_for_username'
+    context.user_data['print_type'] = 'spoiler'
+    
+    await reply_and_track(update, context, "🔒 Wysyłanie tajnej wiadomości\n\nWpisz username odbiorcy (np. @username) lub ID użytkownika:")
+    
+    print(f"ADMIN: /printsecret started by {user_name} (ID: {user_id})")
+    
+    # Delete command message
+    try:
+        await update.message.delete()
+    except:
+        pass
+
 async def spinaddon(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler for /spinaddon12346405459054059049 command - admin command to add 5 spin uses"""
     user_id = update.effective_user.id
@@ -702,6 +762,75 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_name = update.effective_user.first_name
     user_id = update.effective_user.id
     message_text = update.message.text.strip()
+    
+    # Handle print conversation states (admin only)
+    if 'print_state' in context.user_data:
+        state = context.user_data['print_state']
+        print_type = context.user_data.get('print_type', 'normal')
+        
+        if state == 'waiting_for_username':
+            # User entered username or user ID
+            target = message_text
+            context.user_data['print_target'] = target
+            context.user_data['print_state'] = 'waiting_for_message'
+            await reply_and_track(update, context, f"✅ Odbiorca: {target}\n\nWpisz wiadomość do wysłania:")
+            print(f"PRINT: {user_name} (ID: {user_id}) - target: {target}")
+            return
+        
+        elif state == 'waiting_for_message':
+            # User entered message to send
+            target = context.user_data.get('print_target')
+            
+            try:
+                # Try to send message to target
+                if target.startswith('@'):
+                    # It's a username - we need to use chat_id
+                    # Unfortunately, we can't directly send to username without chat_id
+                    # So we'll inform admin to use user ID instead
+                    await reply_and_track(update, context, 
+                        "❌ Nie można wysłać wiadomości bezpośrednio do username.\n"
+                        "Użyj ID użytkownika zamiast username.")
+                    del context.user_data['print_state']
+                    del context.user_data['print_target']
+                    del context.user_data['print_type']
+                    return
+                else:
+                    # It's a user ID
+                    target_id = int(target)
+                    
+                    # Prepare message
+                    if print_type == 'spoiler':
+                        # Use HTML spoiler tag
+                        message_to_send = f"<tg-spoiler>{message_text}</tg-spoiler>"
+                        parse_mode = "HTML"
+                    else:
+                        message_to_send = message_text
+                        parse_mode = None
+                    
+                    # Send message to target user
+                    if parse_mode:
+                        await context.bot.send_message(chat_id=target_id, text=message_to_send, parse_mode=parse_mode)
+                    else:
+                        await context.bot.send_message(chat_id=target_id, text=message_to_send)
+                    
+                    # Confirm to admin
+                    msg_type = "tajną wiadomość" if print_type == 'spoiler' else "wiadomość"
+                    await reply_and_track(update, context, 
+                        f"✅ Wysłano {msg_type} do użytkownika {target_id}")
+                    
+                    print(f"PRINT: {user_name} (ID: {user_id}) - sent {print_type} message to {target_id}")
+                    
+            except ValueError:
+                await reply_and_track(update, context, "❌ Nieprawidłowe ID użytkownika.")
+            except Exception as e:
+                await reply_and_track(update, context, f"❌ Błąd wysyłania: {str(e)}")
+                print(f"PRINT ERROR: {e}")
+            
+            # Clear state
+            del context.user_data['print_state']
+            del context.user_data['print_target']
+            del context.user_data['print_type']
+            return
     
     # Handle spinaddon conversation states
     if 'spinaddon_state' in context.user_data:
@@ -1205,6 +1334,8 @@ def main():
     application.add_handler(CommandHandler("spin", spin))
     application.add_handler(CommandHandler("spinaddon128138027103739247239", spinaddon))
     application.add_handler(CommandHandler("spinaddon12334445849583958495", spinaddon_transfer))
+    application.add_handler(CommandHandler("print", print_command))
+    application.add_handler(CommandHandler("printsecret", printsecret_command))
     application.add_handler(CommandHandler("cancel", cancel))
 
     application.add_handler(CommandHandler("menu", menu))
