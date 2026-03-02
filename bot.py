@@ -755,15 +755,11 @@ async def handle_unknown_command(update: Update, context: ContextTypes.DEFAULT_T
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler for text messages - checks for specific words and handles conversation states"""
-    # Check if bot is blocked
-    if await check_if_blocked(update, context):
-        return
-    
     user_name = update.effective_user.first_name
     user_id = update.effective_user.id
     message_text = update.message.text.strip()
     
-    # Handle print conversation states (admin only)
+    # Handle print conversation states (admin only) - BEFORE bot blocked check
     if 'print_state' in context.user_data:
         state = context.user_data['print_state']
         print_type = context.user_data.get('print_type', 'normal')
