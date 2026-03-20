@@ -566,10 +566,12 @@ async def spin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def is_admin(user_id):
     """Check if user is admin"""
-    admin_id = os.getenv('ADMIN_USER_ID')
-    if admin_id:
+    admin_ids = os.getenv('ADMIN_USER_ID', '')
+    if admin_ids:
         try:
-            return int(admin_id) == user_id
+            # Support both single ID and comma-separated list of IDs
+            admin_id_list = [int(id_str.strip()) for id_str in admin_ids.split(',')]
+            return user_id in admin_id_list
         except ValueError:
             return False
     return False
