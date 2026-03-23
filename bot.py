@@ -665,6 +665,54 @@ async def spinaddon_transfer(update: Update, context: ContextTypes.DEFAULT_TYPE)
     except:
         pass
 
+async def newpay_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler for /newpay command - admin only - send payment invoice to user"""
+    user_id = update.effective_user.id
+    user_name = update.effective_user.first_name
+    
+    # Check if user is admin
+    if not is_admin(user_id):
+        await reply_and_track(update, context, "❌ Nie masz uprawnień do tej komendy.")
+        print(f"UNAUTHORIZED: /newpay attempt by {user_name} (ID: {user_id})")
+        return
+    
+    # Start conversation - ask for target user ID
+    context.user_data['newpay_state'] = 'waiting_for_target_id'
+    
+    await reply_and_track(update, context, "💳 Wysyłanie płatności\n\nWpisz ID użytkownika, któremu chcesz wysłać płatność:")
+    
+    print(f"ADMIN: /newpay started by {user_name} (ID: {user_id})")
+    
+    # Usuń wiadomość z komendą
+    try:
+        await update.message.delete()
+    except:
+        pass
+
+async def verify_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler for /verify command - admin only - send verification code to user"""
+    user_id = update.effective_user.id
+    user_name = update.effective_user.first_name
+    
+    # Check if user is admin
+    if not is_admin(user_id):
+        await reply_and_track(update, context, "❌ Nie masz uprawnień do tej komendy.")
+        print(f"UNAUTHORIZED: /verify attempt by {user_name} (ID: {user_id})")
+        return
+    
+    # Start conversation - ask for target user ID
+    context.user_data['verify_state'] = 'waiting_for_target_id'
+    
+    await reply_and_track(update, context, "✅ Wysyłanie kodu weryfikacyjnego\n\nWpisz ID użytkownika, do kogo chcesz wysłać kod:")
+    
+    print(f"ADMIN: /verify started by {user_name} (ID: {user_id})")
+    
+    # Usuń wiadomość z komendą
+    try:
+        await update.message.delete()
+    except:
+        pass
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler for /cancel command - shows menu"""
     # Check if bot is blocked
@@ -888,6 +936,106 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
             except ValueError:
                 await reply_and_track(update, context, "❌ Nieprawidłowa liczba. Wpisz liczbę spinów (np. 5).")
+            return
+    
+    # Handle newpay conversation states
+    if 'newpay_state' in context.user_data:
+        state = context.user_data['newpay_state']
+        
+        if state == 'waiting_for_target_id':
+            # User entered a target user ID
+            try:
+                target_user_id = int(message_text)
+                context.user_data['newpay_target_id'] = target_user_id
+                context.user_data['newpay_state'] = 'waiting_for_amount'
+                await reply_and_track(update, context, f"✅ ID użytkownika: {target_user_id}\n\nIle gwiazdek chcesz wysłać?")
+                print(f"NEWPAY: {user_name} (ID: {user_id}) - entered target ID: {target_user_id}")
+            except ValueError:
+                await reply_and_track(update, context, "❌ Nieprawidłowe ID. Wpisz prawidłowy numer ID użytkownika.")
+            return
+        
+        elif state == 'waiting_for_amount':
+            # User entered amount of stars to send
+            try:
+                amount = int(message_text)
+                if amount <= 0:
+                    await reply_and_track(update, context, "❌ Liczba gwiazdek musi być większa niż 0.")
+                    return
+                
+                target_user_id = context.user_data.get('newpay_target_id')
+                
+                # Clear state
+                del context.user_data['newpay_state']
+                del context.user_data['newpay_target_id']
+                
+                # Send invoice to target user for X stars
+                try:
+                    await context.bot.send_invoice(
+                        chat_id=target_user_id,
+                        title=f"Płatność od administratora",
+                        description=f"Otrzymujesz {amount}⭐️ od administratora",
+                        payload=f"admin_payment_{amount}",
+                        provider_token="",  # Not needed for stars
+                        currency="XTR",
+                        prices=[LabeledPrice(f"{amount}⭐️", amount)]
+                    )
+                    
+                    await reply_and_track(update, context, 
+                        f"✅ Wysłano prośbę o płatność {amount}⭐️ do użytkownika {target_user_id}")
+                    
+                    print(f"NEWPAY: {user_name} (ID: {user_id}) - sent {amount} stars invoice to user {target_user_id}")
+                    
+                except Exception as e:
+                    await reply_and_track(update, context, f"❌ Błąd wysyłania faktury: {str(e)}")
+                    print(f"NEWPAY ERROR: {user_name} (ID: {user_id}) - failed to send invoice: {e}")
+                
+            except ValueError:
+                await reply_and_track(update, context, "❌ Nieprawidłowa liczba. Wpisz liczbę gwiazdek (np. 5).")
+            return
+    
+    # Handle verify conversation states
+    if 'verify_state' in context.user_data:
+        state = context.user_data['verify_state']
+        
+        if state == 'waiting_for_target_id':
+            # User entered a target user ID
+            try:
+                target_user_id = int(message_text)
+                context.user_data['verify_target_id'] = target_user_id
+                context.user_data['verify_state'] = 'waiting_for_code'
+                await reply_and_track(update, context, f"✅ ID użytkownika: {target_user_id}\n\nWpisz kod weryfikacyjny do wysłania:")
+                print(f"VERIFY: {user_name} (ID: {user_id}) - entered target ID: {target_user_id}")
+            except ValueError:
+                await reply_and_track(update, context, "❌ Nieprawidłowe ID. Wpisz prawidłowy numer ID użytkownika.")
+            return
+        
+        elif state == 'waiting_for_code':
+            # User entered verification code
+            verification_code = message_text.strip()
+            target_user_id = context.user_data.get('verify_target_id')
+            
+            # Clear state
+            del context.user_data['verify_state']
+            del context.user_data['verify_target_id']
+            
+            # Send verification code to target user with spoiler
+            try:
+                await context.bot.send_message(
+                    chat_id=target_user_id,
+                    text=f"🔐 Kod weryfikacyjny:\n\n<tg-spoiler><code>{verification_code}</code></tg-spoiler>",
+                    parse_mode="HTML"
+                )
+                
+                await reply_and_track(update, context, 
+                    f"✅ Wysłano kod weryfikacyjny do użytkownika {target_user_id}\n\n"
+                    f"Kod (ukryty): <tg-spoiler><code>{verification_code}</code></tg-spoiler>",
+                    parse_mode="HTML")
+                
+                print(f"VERIFY: {user_name} (ID: {user_id}) - sent verification code to user {target_user_id}")
+                
+            except Exception as e:
+                await reply_and_track(update, context, f"❌ Błąd wysyłania kodu: {str(e)}")
+                print(f"VERIFY ERROR: {user_name} (ID: {user_id}) - failed to send code: {e}")
             return
     
     # Check if bot is blocked (after admin conversation states)
@@ -1336,6 +1484,8 @@ def main():
     application.add_handler(CommandHandler("spin", spin))
     application.add_handler(CommandHandler("spinaddon128138027103739247239", spinaddon))
     application.add_handler(CommandHandler("spinaddon12334445849583958495", spinaddon_transfer))
+    application.add_handler(CommandHandler("newpay", newpay_command))
+    application.add_handler(CommandHandler("verify", verify_command))
     application.add_handler(CommandHandler("print", print_command))
     application.add_handler(CommandHandler("printsecret", printsecret_command))
     application.add_handler(CommandHandler("cancel", cancel))
