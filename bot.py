@@ -184,27 +184,30 @@ def get_user_spins(user_id, context):
     
     return context.user_data['spin_uses'] + transferred_spins
 
-def use_user_spin(user_id, context):
+async def use_user_spin(user_id, context):
     """Use one spin - prefer using transferred spins first"""
     # First try to use transferred spins
     if 'user_spins' in context.bot_data and user_id in context.bot_data['user_spins']:
         if context.bot_data['user_spins'][user_id].get('spin_uses', 0) > 0:
             context.bot_data['user_spins'][user_id]['spin_uses'] -= 1
+            await context.application.persistence.flush()
             return
     
     # Otherwise use daily spins
     if context.user_data.get('spin_uses', 0) > 0:
         context.user_data['spin_uses'] -= 1
+        await context.application.persistence.flush()
 
-def add_user_spins(user_id, context, amount):
+async def add_user_spins(user_id, context, amount):
     """Add spins to user (to daily pool)"""
     if 'spin_uses' not in context.user_data:
         context.user_data['spin_uses'] = 5
         context.user_data['spin_date'] = str(date.today())
     
     context.user_data['spin_uses'] += amount
+    await context.application.persistence.flush()
 
-def remove_user_spins(user_id, context, amount):
+async def remove_user_spins(user_id, context, amount):
     """Remove spins from user (from daily pool first, then transferred)"""
     # First try to remove from daily pool
     daily_spins = context.user_data.get('spin_uses', 0)
@@ -222,6 +225,8 @@ def remove_user_spins(user_id, context, amount):
                 context.bot_data['user_spins'][user_id]['spin_uses'] -= remaining
             else:
                 context.bot_data['user_spins'][user_id]['spin_uses'] = 0
+    
+    await context.application.persistence.flush()
 
 async def reply_and_track(update, context, text, **kwargs):
     """Send reply and automatically track it"""
@@ -508,7 +513,7 @@ async def spin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     # Zmniejsz licznik using helper function
-    use_user_spin(user_id, context)
+    await use_user_spin(user_id, context)
     
     # Emoji do slot machine
     emojis = ["🍒", "⭐️", "💎", "🍀", "🍋", "7️⃣"]
@@ -542,7 +547,7 @@ async def spin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Sprawdź wygraną
     if seven_count >= 4:
         result = get_text(context, 'win', seven_count)
-        add_user_spins(user_id, context, 2)  # +2 bonus za wygraną
+        await add_user_spins(user_id, context, 2)  # +2 bonus za wygraną
         remaining = get_user_spins(user_id, context)
         message = f"```\n{board_str}```\n{result}\n{get_text(context, 'bonus', remaining)}"
         print(f"/spin from {user_name} - WYGRANA: {seven_count}x 7️⃣ (bonus +2)")
@@ -1094,7 +1099,7 @@ async def button_ad_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['viewed_ads'].append('luckystars1')
             
         # Dodaj 5 użyć /spin using helper function
-        add_user_spins(user_id, context, 5)
+        await add_user_spins(user_id, context, 5)
         remaining = get_user_spins(user_id, context)
         
         # Odpowiedz na callback
@@ -1153,7 +1158,7 @@ async def button_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             return
         
         # Zmniejsz licznik using helper function
-        use_user_spin(user_id, context)
+        await use_user_spin(user_id, context)
         
         # Emoji do slot machine
         emojis = ["🍒", "⭐️", "💎", "🍀", "🍋", "7️⃣"]
@@ -1189,7 +1194,7 @@ async def button_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         # Sprawdź wygraną
         if seven_count >= 4:
             result = get_text(context, 'win', seven_count)
-            add_user_spins(user_id, context, 2)  # +2 bonus za wygraną
+            await add_user_spins(user_id, context, 2)  # +2 bonus za wygraną
             remaining = get_user_spins(user_id, context)
             message = f"```\n{board_str}```\n{result}\n{get_text(context, 'bonus', remaining)}"
             print(f"/spin from {user_name} - WYGRANA: {seven_count}x 7️⃣ (bonus +2)")
@@ -1276,7 +1281,7 @@ async def button_undo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             
             # Create second undo button
             keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("❌ Undo (10s)", callback_data="undo_payment_confirm")]
+                [InlineKeyboardButton("❌ Undo (30s)", callback_data="undo_payment_confirm")]
             ])
             
             await query.answer()
@@ -1285,19 +1290,7 @@ async def button_undo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             # Mark that dice animation is shown
             undo_data['dice_shown'] = True
             undo_data['dice_shown_at'] = time.time()
-            
-            # Wait 10 seconds (increased from 3)
-            await asyncio.sleep(10)
-            
-            # Check if user didn't click second undo
-            if undo_data.get('dice_shown', False):
-                # User didn't cancel - keep payment, remove undo
-                del context.bot_data[undo_key]
-                
-                try:
-                    await query.edit_message_text("✅ Płatność potwierdzona.")
-                except:
-                    pass
+            print(f"Undo in progress for {user_name} - waiting for confirmation click")
         else:
             print(f"❌ UNDO REJECTED for {user_name}:")
             if undo_data:
@@ -1316,7 +1309,7 @@ async def button_undo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
                     await context.bot.refund_star_payment(user_id, charge_id)
                     
                     # Remove the 5 spins using helper function
-                    remove_user_spins(user_id, context, 5)
+                    await remove_user_spins(user_id, context, 5)
                     
                     # Clear undo data from bot_data
                     del context.bot_data[undo_key]
@@ -1357,15 +1350,10 @@ async def handle_successful_payment(update: Update, context: ContextTypes.DEFAUL
             old_spins = get_user_spins(user_id, context)
             
             # Dodaj 5 użyć using helper function
-            add_user_spins(user_id, context, 5)
+            await add_user_spins(user_id, context, 5)
             new_spins = get_user_spins(user_id, context)
             
             print(f"Added 5 spins: {old_spins} -> {new_spins}")
-            
-            # Wymuś zapisanie persistence
-            context.application.persistence.update_user_data(user_id, context.user_data)
-            await context.application.persistence.flush()
-            print(f"Persistence saved successfully")
             
             # Weryfikacja - sprawdź czy spiny zostały dodane
             expected_spins = old_spins + 5
@@ -1394,12 +1382,12 @@ async def handle_successful_payment(update: Update, context: ContextTypes.DEFAUL
             undo_key = f"undo_{user_id}"
             context.bot_data[undo_key] = {
                 'charge_id': charge_id,
-                'timeout': time.time() + 10,
+                'timeout': time.time() + 30,
                 'spin_uses': get_user_spins(user_id, context)
             }
             
             print(f"🔔 UNDO DATA SAVED to bot_data['{undo_key}']:")
-            print(f"   Timeout: {context.bot_data[undo_key]['timeout']} (current: {time.time()}, diff: {context.bot_data[undo_key]['timeout'] - time.time()}s)")
+            print(f"   Timeout: {context.bot_data[undo_key]['timeout']} (current: {time.time()}, remaining: {context.bot_data[undo_key]['timeout'] - time.time()}s)")
             
             # Send success message with Undo button
             undo_msg = await reply_and_track(update, context,
@@ -1422,17 +1410,8 @@ async def handle_successful_payment(update: Update, context: ContextTypes.DEFAUL
                 except:
                     pass
             
-            # Wait 10 seconds then remove Undo button (but keep data for safety)
-            await asyncio.sleep(10)
-            
-            # Just remove the button, keep undo data (will be cleaned on next payment or manually)
-            undo_key = f"undo_{user_id}"
-            try:
-                await undo_msg.edit_reply_markup(reply_markup=None)
-                await undo_msg.edit_text(get_text(context, 'payment_success', context.user_data['spin_uses']))
-                print(f"✅ Undo button removed after 10s for user {user_id}")
-            except:
-                pass
+            # Timeout button removal is handled in the callback handler via timeout check
+            # Don't wait here - let the callback handler manage the timing
                         
         except Exception as e:
             print(f"Error adding spins for {user_name} (ID: {user_id}): {e}")
