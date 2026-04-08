@@ -167,8 +167,42 @@ async def track_message(msg, context):
 
 def get_user_spins(user_id, context):
     """Get total spin count for user (combining user_data and transferred spins from bot_data)"""
+    import pickle
     today = str(date.today())
     
+    # Try to get fresh data directly from persistence file first
+    try:
+        if hasattr(context, 'application') and hasattr(context.application, 'persistence'):
+            persistence_filepath = context.application.persistence.filepath
+            with open(persistence_filepath, 'rb') as f:
+                data = pickle.load(f)
+            
+            if 'user_data' in data and user_id in data['user_data']:
+                user_data = data['user_data'][user_id]
+                
+                # Check if spin_date is set and if it's today
+                spin_date = user_data.get('spin_date', today)
+                spin_uses = user_data.get('spin_uses', 5)
+                
+                # Reset daily spins if new day
+                if spin_date != today:
+                    spin_uses = 5
+                    user_data['spin_uses'] = 5
+                    user_data['spin_date'] = today
+                
+                # Update context with fresh data
+                context.user_data.update(user_data)
+                
+                # Get transferred spins from bot_data
+                transferred_spins = 0
+                if 'user_spins' in data.get('bot_data', {}) and user_id in data['bot_data']['user_spins']:
+                    transferred_spins = data['bot_data']['user_spins'][user_id].get('spin_uses', 0)
+                
+                return spin_uses + transferred_spins
+    except Exception:
+        pass
+    
+    # Fallback to context-based approach if file read fails
     # Initialize user_data if needed
     if 'spin_uses' not in context.user_data:
         context.user_data['spin_uses'] = 5
@@ -1482,13 +1516,23 @@ def handle_terminal_commands():
                     data['user_data'][user_id]['spin_uses'] = \
                         data['user_data'][user_id].get('spin_uses', 0) + amount
                     
+                    # Set spin_date to today so it doesn't get reset
+                    data['user_data'][user_id]['spin_date'] = str(date.today())
+                    
                     # Save back to file
                     with open(persistence_filepath, 'wb') as f:
                         pickle.dump(data, f)
                     
-                    total_spins = data['user_data'][user_id]['spin_uses']
+                    # Clear the persistence cache for this user so it reloads from file
+                    if hasattr(global_app.persistence, 'user_data'):
+                        if user_id in global_app.persistence.user_data:
+                            # Reset the user's spin_uses to force reload
+                            global_app.persistence.user_data[user_id] = data['user_data'][user_id].copy()
+                    
+                    total_spins = data['user_data'][user_id].get('spin_uses', amount)
                     print(f"✅ Dodano {amount} spinów dla User ID: {user_id}")
-                    print(f"   Razem spinów: {total_spins}\n")
+                    print(f"   Razem spinów: {total_spins}")
+                    print(f"   ⓘ Wpisz /checkspins w Telegramie aby zobaczyć aktualizację\n")
                 
                 except Exception as e:
                     print(f"❌ Błąd podczas dodawania spinów: {e}\n")
