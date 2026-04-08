@@ -216,7 +216,7 @@ def get_user_spins(user_id, context):
     return context.user_data['spin_uses'] + transferred_spins
 
 
-async def 55use_user_spin(user_id, context):
+async def use_user_spin(user_id, context):
     """Use one spin - prefer using transferred spins first"""
     # First try to use transferred spins
     if 'user_spins' in context.bot_data and user_id in context.bot_data['user_spins']:
