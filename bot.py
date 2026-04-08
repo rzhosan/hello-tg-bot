@@ -166,40 +166,31 @@ async def track_message(msg, context):
     return msg
 
 def get_user_spins(user_id, context):
-    """Get total spin count for user (combining user_data and transferred spins from bot_data)"""
+    """Get total spin count for user - always fresh from file"""
     import pickle
     today = str(date.today())
     
-    # Try to get fresh data directly from persistence file first
+    # Always try to read fresh data from persistence file first
     try:
         if hasattr(context, 'application') and hasattr(context.application, 'persistence'):
-            persistence_filepath = context.application.persistence.filepath
-            with open(persistence_filepath, 'rb') as f:
+            filepath = context.application.persistence.filepath
+            with open(filepath, 'rb') as f:
                 data = pickle.load(f)
             
             if 'user_data' in data and user_id in data['user_data']:
                 user_data = data['user_data'][user_id]
-                
-                # Check if spin_date is set and if it's today
-                spin_date = user_data.get('spin_date', today)
                 spin_uses = user_data.get('spin_uses', 5)
+                spin_date = user_data.get('spin_date', today)
                 
-                # Reset daily spins if new day
+                # Reset if new day
                 if spin_date != today:
                     spin_uses = 5
-                    user_data['spin_uses'] = 5
-                    user_data['spin_date'] = today
                 
-                # Update BOTH context and persistence cache with fresh data
-                context.user_data.update(user_data)
+                # Update context.user_data so future operations use this data
+                context.user_data['spin_uses'] = spin_uses
+                context.user_data['spin_date'] = spin_date if spin_date == today else today
                 
-                # Also update the persistence cache so future flushes have correct data
-                if hasattr(context.application.persistence, 'user_data'):
-                    if user_id not in context.application.persistence.user_data:
-                        context.application.persistence.user_data[user_id] = {}
-                    context.application.persistence.user_data[user_id].update(user_data)
-                
-                # Get transferred spins from bot_data
+                # Get transferred spins
                 transferred_spins = 0
                 if 'user_spins' in data.get('bot_data', {}) and user_id in data['bot_data']['user_spins']:
                     transferred_spins = data['bot_data']['user_spins'][user_id].get('spin_uses', 0)
@@ -208,13 +199,11 @@ def get_user_spins(user_id, context):
     except Exception as e:
         pass
     
-    # Fallback to context-based approach if file read fails
-    # Initialize user_data if needed
+    # Fallback if file read fails
     if 'spin_uses' not in context.user_data:
         context.user_data['spin_uses'] = 5
         context.user_data['spin_date'] = today
     
-    # Reset daily spins if new day
     if context.user_data.get('spin_date') != today:
         context.user_data['spin_uses'] = 5
         context.user_data['spin_date'] = today
@@ -1476,10 +1465,12 @@ async def handle_successful_payment(update: Update, context: ContextTypes.DEFAUL
 
 # Global variable to store application reference for terminal commands
 global_app = None
+# Dictionary to track users with pending updates from terminal
+pending_user_updates = {}
 
 def handle_terminal_commands():
     """Handle commands from terminal in format: add-spins-{user_id}-in-{amount}"""
-    global global_app
+    global global_app, pending_user_updates
     import pickle
     
     print("\n💬 Terminal command handler started.")
@@ -1529,17 +1520,21 @@ def handle_terminal_commands():
                     with open(persistence_filepath, 'wb') as f:
                         pickle.dump(data, f)
                     
-                    # Clear the persistence cache for this user so it reloads from file
-                    if hasattr(global_app.persistence, 'user_data'):
-                        if user_id not in global_app.persistence.user_data:
-                            global_app.persistence.user_data[user_id] = {}
-                        # Update cache with new data
-                        global_app.persistence.user_data[user_id].update(data['user_data'][user_id])
+                    # Force reload of persistence - clear and reload
+                    if hasattr(global_app.persistence, '_user_data'):
+                        global_app.persistence._user_data.clear()
+                        global_app.persistence._user_data.update(data.get('user_data', {}))
+                    elif hasattr(global_app.persistence, 'user_data'):
+                        try:
+                            global_app.persistence.user_data.clear()
+                            global_app.persistence.user_data.update(data.get('user_data', {}))
+                        except:
+                            pass
                     
                     total_spins = data['user_data'][user_id].get('spin_uses', amount)
                     print(f"✅ Dodano {amount} spinów dla User ID: {user_id}")
                     print(f"   Razem spinów: {total_spins}")
-                    print(f"   ⓘ Wpisz /checkspins w Telegramie aby zobaczyć aktualizację\n")
+                    print(f"   ⓘ Spiny będą zsynchronizowane gdy użytkownik będzie z botem interakcji\n")
                 
                 except Exception as e:
                     print(f"❌ Błąd podczas dodawania spinów: {e}\n")
