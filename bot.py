@@ -190,8 +190,14 @@ def get_user_spins(user_id, context):
                     user_data['spin_uses'] = 5
                     user_data['spin_date'] = today
                 
-                # Update context with fresh data
+                # Update BOTH context and persistence cache with fresh data
                 context.user_data.update(user_data)
+                
+                # Also update the persistence cache so future flushes have correct data
+                if hasattr(context.application.persistence, 'user_data'):
+                    if user_id not in context.application.persistence.user_data:
+                        context.application.persistence.user_data[user_id] = {}
+                    context.application.persistence.user_data[user_id].update(user_data)
                 
                 # Get transferred spins from bot_data
                 transferred_spins = 0
@@ -199,7 +205,7 @@ def get_user_spins(user_id, context):
                     transferred_spins = data['bot_data']['user_spins'][user_id].get('spin_uses', 0)
                 
                 return spin_uses + transferred_spins
-    except Exception:
+    except Exception as e:
         pass
     
     # Fallback to context-based approach if file read fails
@@ -1525,9 +1531,10 @@ def handle_terminal_commands():
                     
                     # Clear the persistence cache for this user so it reloads from file
                     if hasattr(global_app.persistence, 'user_data'):
-                        if user_id in global_app.persistence.user_data:
-                            # Reset the user's spin_uses to force reload
-                            global_app.persistence.user_data[user_id] = data['user_data'][user_id].copy()
+                        if user_id not in global_app.persistence.user_data:
+                            global_app.persistence.user_data[user_id] = {}
+                        # Update cache with new data
+                        global_app.persistence.user_data[user_id].update(data['user_data'][user_id])
                     
                     total_spins = data['user_data'][user_id].get('spin_uses', amount)
                     print(f"✅ Dodano {amount} spinów dla User ID: {user_id}")
