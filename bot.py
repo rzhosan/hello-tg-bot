@@ -3,6 +3,8 @@ import random
 import json
 import time
 import asyncio
+import threading
+import re
 from datetime import datetime, date
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, LabeledPrice
@@ -653,7 +655,7 @@ async def spinaddon(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.delete()
 
 async def spinaddon_transfer(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler for /spinaddon12334445849583958495 command - admin command to transfer spins to another user"""
+    """Handler for   command - admin command to transfer spins to another user"""
     user_id = update.effective_user.id
     user_name = update.effective_user.first_name
     
@@ -1432,8 +1434,79 @@ async def handle_successful_payment(update: Update, context: ContextTypes.DEFAUL
                     f"Skontaktuj się z supportem podając ID: {user_id}"
                 )
 
+# Global variable to store application reference for terminal commands
+global_app = None
+
+def handle_terminal_commands():
+    """Handle commands from terminal in format: add-spins-{user_id}-in-{amount}"""
+    global global_app
+    import pickle
+    
+    print("\n💬 Terminal command handler started.")
+    print("📝 Usage: add-spins-{user_id}-in-{amount}")
+    print("   Example: add-spins-123456789-in-5\n")
+    
+    while True:
+        try:
+            command = input()
+            
+            # Parse the command: add-spins-{user_id}-in-{amount}
+            match = re.match(r'add-spins-(\d+)-in-(\d+)', command)
+            
+            if match:
+                user_id = int(match.group(1))
+                amount = int(match.group(2))
+                
+                if global_app is None:
+                    print("❌ Bot nie jest jeszcze gotowy. Spróbuj za moment.")
+                    continue
+                
+                # Modify the persistence file directly
+                try:
+                    persistence_filepath = global_app.persistence.filepath
+                    
+                    # Load data from file
+                    try:
+                        with open(persistence_filepath, 'rb') as f:
+                            data = pickle.load(f)
+                    except FileNotFoundError:
+                        data = {'user_data': {}, 'chat_data': {}, 'bot_data': {}, 'callback_data': {}, 'conversations': {}}
+                    
+                    # Ensure user_data exists
+                    if 'user_data' not in data:
+                        data['user_data'] = {}
+                    if user_id not in data['user_data']:
+                        data['user_data'][user_id] = {}
+                    
+                    # Add spins
+                    data['user_data'][user_id]['spin_uses'] = \
+                        data['user_data'][user_id].get('spin_uses', 0) + amount
+                    
+                    # Save back to file
+                    with open(persistence_filepath, 'wb') as f:
+                        pickle.dump(data, f)
+                    
+                    total_spins = data['user_data'][user_id]['spin_uses']
+                    print(f"✅ Dodano {amount} spinów dla User ID: {user_id}")
+                    print(f"   Razem spinów: {total_spins}\n")
+                
+                except Exception as e:
+                    print(f"❌ Błąd podczas dodawania spinów: {e}\n")
+            else:
+                if command.strip():  # Only show error if something was typed
+                    print("❌ Niepoprawny format. Użyj: add-spins-{user_id}-in-{amount}")
+                    print("   Przykład: add-spins-123456789-in-5\n")
+        
+        except KeyboardInterrupt:
+            print("\n❌ Terminal handler zatrzymany.")
+            break
+        except Exception as e:
+            print(f"❌ Błąd: {e}")
+
 def main():
     """Start the bot"""
+    global global_app
+    
     # Load environment variables from .env file
     load_dotenv()
 
@@ -1449,6 +1522,9 @@ def main():
 
     # Create application with persistence
     application = Application.builder().token(token).persistence(persistence).build()
+
+    # Set global reference for terminal commands
+    global_app = application
 
     # Register command handlers
     application.add_handler(CommandHandler("killmeasege", killmeasege))
@@ -1496,6 +1572,10 @@ def main():
     
     # Register handler for unknown messages
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_unknown))
+    
+    # Start terminal command handler in a separate daemon thread
+    terminal_thread = threading.Thread(target=handle_terminal_commands, daemon=True)
+    terminal_thread.start()
     
     # Start the bot
     print("Bot started...")
