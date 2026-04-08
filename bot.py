@@ -215,7 +215,8 @@ def get_user_spins(user_id, context):
     
     return context.user_data['spin_uses'] + transferred_spins
 
-async def use_user_spin(user_id, context):
+
+async def 55use_user_spin(user_id, context):
     """Use one spin - prefer using transferred spins first"""
     # First try to use transferred spins
     if 'user_spins' in context.bot_data and user_id in context.bot_data['user_spins']:
@@ -227,6 +228,13 @@ async def use_user_spin(user_id, context):
     # Otherwise use daily spins
     if context.user_data.get('spin_uses', 0) > 0:
         context.user_data['spin_uses'] -= 1
+        
+        # Sync context.user_data with persistence cache before flushing
+        if hasattr(context.application.persistence, 'user_data'):
+            if user_id not in context.application.persistence.user_data:
+                context.application.persistence.user_data[user_id] = {}
+            context.application.persistence.user_data[user_id].update(context.user_data)
+        
         await context.application.persistence.flush()
 
 async def add_user_spins(user_id, context, amount):
@@ -236,6 +244,13 @@ async def add_user_spins(user_id, context, amount):
         context.user_data['spin_date'] = str(date.today())
     
     context.user_data['spin_uses'] += amount
+    
+    # Sync context.user_data with persistence cache before flushing
+    if hasattr(context.application.persistence, 'user_data'):
+        if user_id not in context.application.persistence.user_data:
+            context.application.persistence.user_data[user_id] = {}
+        context.application.persistence.user_data[user_id].update(context.user_data)
+    
     await context.application.persistence.flush()
 
 async def remove_user_spins(user_id, context, amount):
@@ -256,6 +271,12 @@ async def remove_user_spins(user_id, context, amount):
                 context.bot_data['user_spins'][user_id]['spin_uses'] -= remaining
             else:
                 context.bot_data['user_spins'][user_id]['spin_uses'] = 0
+    
+    # Sync context.user_data with persistence cache before flushing
+    if hasattr(context.application.persistence, 'user_data'):
+        if user_id not in context.application.persistence.user_data:
+            context.application.persistence.user_data[user_id] = {}
+        context.application.persistence.user_data[user_id].update(context.user_data)
     
     await context.application.persistence.flush()
 
